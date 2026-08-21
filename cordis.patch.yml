@@ -1,0 +1,4 @@
+# Mount the CTeam host plugin in the DSH profile.
+- insert:
+    - id: dsh-cteam
+      name: 'dsh-cteam'

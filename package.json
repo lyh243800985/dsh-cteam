@@ -1,0 +1,50 @@
+{
+  "name": "dsh-cteam",
+  "version": "0.1.0",
+  "description": "CTeam read tools for DeepSeek Harness",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./client": "./client/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "client",
+    "skills",
+    "scripts",
+    "test",
+    "docs",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test",
+    "smoke:demands": "node scripts/smoke-demands.mjs",
+    "smoke:detail": "node scripts/smoke-detail.mjs",
+    "smoke:bugs": "node scripts/smoke-bugs.mjs",
+    "smoke:filters": "node scripts/smoke-filters.mjs",
+    "smoke:issue-detail": "node scripts/smoke-issue-detail.mjs",
+    "smoke:transitions": "node scripts/smoke-transitions.mjs"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-tools": "^0.1.0-rc.7"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-layout"
+      ],
+      "platform": "web"
+    }
+  },
+  "license": "UNLICENSED",
+  "private": true
+}

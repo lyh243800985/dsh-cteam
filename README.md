@@ -26,6 +26,10 @@
 
 ![PRD 提交成功](./docs/images/prd-submit-success.png)
 
+上传完成后，可以在 CTeam 页面查看已经创建的需求和正文图片。
+
+![CTeam 需求查看效果](./docs/images/cteam-demand-result.png)
+
 ## 注意事项
 
 - 右侧工作台的编辑和自动保存依赖浏览器缓存，不会直接修改本地 Markdown 文件。

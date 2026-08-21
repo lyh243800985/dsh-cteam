@@ -1,4 +1,4 @@
-export const PROJECT_PARAMETER_DESCRIPTION = 'Optional. If omitted, uses the default projectId from the dsh-cteam plugin config or .ops-local/cw-browser-login.json; explicit project_id or a project_url /vteam/{projectId}/ can select another project.';
+export const PROJECT_PARAMETER_DESCRIPTION = 'Optional. If omitted, uses the default projectId from the dsh-cteam plugin config, project local/local.json, legacy project .ops-local/cw-browser-login.json, or package local/local.json; explicit project_id or a project_url /vteam/{projectId}/ can select another project.';
 export const PROJECT_ID_PARAMETER_DESCRIPTION = 'Optional project ID. Overrides the configured/local default projectId; when project_url is also provided, both must identify the same project.';
 
 export function sessionCwd(exec) {

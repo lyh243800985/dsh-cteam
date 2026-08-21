@@ -84,7 +84,7 @@ import {
 import {
   createPrdAuthoringTool,
 } from './prd-authoring.js';
-import { resolveDefaultProjectId } from './project-config.js';
+import { rememberProjectIdFromArgs, resolveDefaultProjectId } from './project-config.js';
 import {
   flattenWikiTree,
   getLastWikiImportTarget,
@@ -104,6 +104,7 @@ export const inject = ['tools', 'skills', 'userQuestions'];
 const CTEAM_DETAIL_PRESENTATION_MARKER = 'dsh-cteam-detail-v1:';
 const CTEAM_SUBMISSION_PRESENTATION_MARKER = 'dsh-cteam-submission-v1:';
 const CTEAM_WIKI_DETAIL_PRESENTATION_MARKER = 'dsh-cteam-wiki-detail-v1:';
+const CTEAM_WIKI_IMPORT_PRESENTATION_MARKER = 'dsh-cteam-wiki-import-v1:';
 const CTEAM_FORM_INTENT_KIND = 'cteam-form';
 const CTEAM_WIKI_IMPORT_FORM_INTENT_KIND = 'cteam-wiki-import-form';
 const DEFAULT_SUBMISSION_OPTION_LIMIT = 80;
@@ -680,6 +681,7 @@ async function askPrdSubmissionConfirmation(args, exec, config = {}) {
   const input = parseToolArguments(args, {
     configuredProjectId: resolveDefaultProjectId(config, exec),
   });
+  rememberProjectIdFromArgs(args, input.projectId, config, exec);
   const operation = normalizeSubmissionOperation(args.operation);
   const loginConfigPath = resolveLoginConfigPath(
     config.loginConfigPath,
@@ -921,6 +923,7 @@ function buildSubmissionRetryArgs(projectId, submission, args, markdown, images 
 async function createDemandFromSubmissionPayload(submission, args, exec, config = {}) {
   const projectId = stringOption(submission.projectId, 'projectId') ?? stringOption(args.project_id, 'project_id') ?? resolveDefaultProjectId(config, exec);
   if (!projectId) throw new Error('projectId is required');
+  rememberProjectIdFromArgs(args, projectId, config, exec);
   const loginConfigPath = resolveLoginConfigPath(
     config.loginConfigPath,
     sessionCwd(exec),
@@ -947,6 +950,7 @@ async function createDemandFromSubmissionPayload(submission, args, exec, config 
     templateId: stringOption(args.template_id, 'template_id'),
   });
   const uploadedImages = [];
+  const sourceMarkdown = typeof submission.draftMarkdown === 'string' ? submission.draftMarkdown : '';
 
   if (!dryRun) {
     for (const image of Array.isArray(submission.images) ? submission.images : []) {
@@ -968,7 +972,7 @@ async function createDemandFromSubmissionPayload(submission, args, exec, config 
   }
 
   const markdownWithImages = replaceImagePlaceholders(
-    submission.draftMarkdown,
+    sourceMarkdown,
     projectId,
     uploadedImages,
   );
@@ -991,6 +995,7 @@ async function createDemandFromSubmissionPayload(submission, args, exec, config 
       categoryId: submission.categoryId,
       categoryPath: submission.categoryPath,
       model,
+      sourceMarkdown,
       markdown: markdownWithImages,
       descHtml,
       requestBody,
@@ -1018,10 +1023,11 @@ async function createDemandFromSubmissionPayload(submission, args, exec, config 
       categoryId: submission.categoryId,
       categoryPath: submission.categoryPath,
       model,
+      sourceMarkdown,
       markdown: markdownWithImages,
       descHtml,
       requestBody,
-      retryArgs: buildSubmissionRetryArgs(projectId, submission, args, markdownWithImages, []),
+      retryArgs: buildSubmissionRetryArgs(projectId, submission, args, sourceMarkdown, submission.images),
       uploadedImages,
       issue: {
         id: '',
@@ -1052,10 +1058,11 @@ async function createDemandFromSubmissionPayload(submission, args, exec, config 
       categoryId: submission.categoryId,
       categoryPath: submission.categoryPath,
       model,
+      sourceMarkdown,
       markdown: markdownWithImages,
       descHtml,
       requestBody,
-      retryArgs: buildSubmissionRetryArgs(projectId, submission, args, markdownWithImages, []),
+      retryArgs: buildSubmissionRetryArgs(projectId, submission, args, sourceMarkdown, submission.images),
       uploadedImages,
       issue: {
         id: '',
@@ -1075,6 +1082,7 @@ async function createDemandFromSubmissionPayload(submission, args, exec, config 
     categoryId: submission.categoryId,
     categoryPath: submission.categoryPath,
     model,
+    sourceMarkdown,
     markdown: markdownWithImages,
     descHtml,
     requestBody,
@@ -1160,6 +1168,7 @@ const demandSubmitOutputSchema = {
       required: true,
       items: { type: 'string' },
     },
+    sourceMarkdown: { type: 'string' },
     markdown: { type: 'string', required: true },
     descHtml: { type: 'string', required: true },
     requestBody: {
@@ -1351,7 +1360,7 @@ function renderResult(value) {
 export function createDemandCategoryTool(config = {}) {
   return defineTool({
     name: 'cteam_list_demand_categories',
-    description: 'Read a CTeam project demand classification tree. The project defaults to projectId from the dsh-cteam plugin config or .ops-local/cw-browser-login.json; provide project_url or project_id to select another project. Omit parent_id/query to list roots; use parent_id for children, include_descendants for a subtree, or query to search names and full paths.',
+    description: 'Read a CTeam project demand classification tree. The project defaults to projectId from the dsh-cteam plugin config, project local/local.json, legacy project .ops-local/cw-browser-login.json, or package local/local.json; provide project_url or project_id to select another project. Omit parent_id/query to list roots; use parent_id for children, include_descendants for a subtree, or query to search names and full paths.',
     parameters: {
       project_url: {
         type: 'string',
@@ -1405,6 +1414,7 @@ export function createDemandCategoryTool(config = {}) {
       const input = parseToolArguments(args, {
         configuredProjectId: resolveDefaultProjectId(config, exec),
       });
+      rememberProjectIdFromArgs(args, input.projectId, config, exec);
       const loginConfigPath = resolveLoginConfigPath(
         config.loginConfigPath,
         sessionCwd(exec),
@@ -1482,7 +1492,7 @@ function renderDemandList(value) {
 export function createDemandListTool(config = {}) {
   return defineTool({
     name: 'cteam_list_demands',
-    description: 'List CTeam demands with pagination and field filters. The project defaults to projectId from the dsh-cteam plugin config or .ops-local/cw-browser-login.json; provide project_url or project_id to select another project. category_id is the primary version/classification filter and should come from cteam_list_demand_categories.',
+    description: 'List CTeam demands with pagination and field filters. The project defaults to projectId from the dsh-cteam plugin config, project local/local.json, legacy project .ops-local/cw-browser-login.json, or package local/local.json; provide project_url or project_id to select another project. category_id is the primary version/classification filter and should come from cteam_list_demand_categories.',
     parameters: {
       project_url: {
         type: 'string',
@@ -1559,6 +1569,7 @@ export function createDemandListTool(config = {}) {
       const input = parseDemandToolArguments(args, {
         configuredProjectId: resolveDefaultProjectId(config, exec),
       });
+      rememberProjectIdFromArgs(args, input.projectId, config, exec);
       const loginConfigPath = resolveLoginConfigPath(
         config.loginConfigPath,
         sessionCwd(exec),
@@ -1601,7 +1612,7 @@ function renderIssueList(value) {
 export function createBugListTool(config = {}) {
   return defineTool({
     name: 'cteam_list_bugs',
-    description: 'List CTeam bug/defect issues with pagination and field filters. The project defaults to projectId from the dsh-cteam plugin config or .ops-local/cw-browser-login.json; provide project_url or project_id to select another project. Use filters from cteam_list_issue_filters queryFields or quickFilters conditions.',
+    description: 'List CTeam bug/defect issues with pagination and field filters. The project defaults to projectId from the dsh-cteam plugin config, project local/local.json, legacy project .ops-local/cw-browser-login.json, or package local/local.json; provide project_url or project_id to select another project. Use filters from cteam_list_issue_filters queryFields or quickFilters conditions.',
     parameters: {
       project_url: {
         type: 'string',
@@ -1675,6 +1686,7 @@ export function createBugListTool(config = {}) {
         configuredProjectId: resolveDefaultProjectId(config, exec),
         defaultIssueType: 'BUG',
       });
+      rememberProjectIdFromArgs(args, input.projectId, config, exec);
       const loginConfigPath = resolveLoginConfigPath(
         config.loginConfigPath,
         sessionCwd(exec),
@@ -1814,6 +1826,7 @@ export function createIssueFiltersTool(config = {}) {
         configuredProjectId: resolveDefaultProjectId(config, exec),
         defaultIssueType: 'BUG',
       });
+      rememberProjectIdFromArgs(args, input.projectId, config, exec);
       const loginConfigPath = resolveLoginConfigPath(
         config.loginConfigPath,
         sessionCwd(exec),
@@ -2030,6 +2043,7 @@ async function readIssueDetail(args, exec, config = {}) {
   const input = parseDemandDetailToolArguments(args, {
     configuredProjectId: resolveDefaultProjectId(config, exec),
   });
+  rememberProjectIdFromArgs(args, input.projectId, config, exec);
   const issueType = parseIssueListToolArguments({
     project_id: input.projectId,
     issue_type: args.issue_type,
@@ -2081,7 +2095,7 @@ async function readIssueDetail(args, exec, config = {}) {
 export function createDemandDetailTool(config = {}) {
   return defineTool({
     name: 'cteam_get_demand_detail',
-    description: 'Get a single CTeam demand detail through the logged-in web session, including its comments. This tool is self-contained and does not require Browser tools; do not call Browser to retrieve or verify the same detail. Provide demand_id from cteam_list_demands, or demand_url containing /vteam/{projectId}/ and an id/issueId query parameter. The project defaults to projectId from the dsh-cteam plugin config or .ops-local/cw-browser-login.json.',
+    description: 'Get a single CTeam demand detail through the logged-in web session, including its comments. This tool is self-contained and does not require Browser tools; do not call Browser to retrieve or verify the same detail. Provide demand_id from cteam_list_demands, or demand_url containing /vteam/{projectId}/ and an id/issueId query parameter. The project defaults to projectId from the dsh-cteam plugin config, project local/local.json, legacy project .ops-local/cw-browser-login.json, or package local/local.json.',
     parameters: {
       demand_url: {
         type: 'string',
@@ -2371,6 +2385,7 @@ export function createIssueTransitionsTool(config = {}) {
         configuredProjectId: resolveDefaultProjectId(config, exec),
         defaultIssueType: 'BUG',
       });
+      rememberProjectIdFromArgs(args, input.projectId, config, exec);
       const loginConfigPath = resolveLoginConfigPath(
         config.loginConfigPath,
         sessionCwd(exec),
@@ -2599,6 +2614,7 @@ export function createWikiTreeTool(config = {}) {
       const input = parseWikiTreeToolArguments(args, {
         configuredProjectId: resolveDefaultProjectId(config, exec),
       });
+      rememberProjectIdFromArgs(args, input.projectId, config, exec);
       const resolved = await resolveWikiLibraryForInput(input, config, exec, config.requestTimeoutMs ?? 20_000);
       const tree = await fetchWikiTree({
         baseUrl: resolved.baseUrl,
@@ -2726,6 +2742,7 @@ export function createWikiDetailTool(config = {}) {
       const input = parseWikiDetailToolArguments(args, {
         configuredProjectId: resolveDefaultProjectId(config, exec),
       });
+      rememberProjectIdFromArgs(args, input.projectId, config, exec);
       const resolved = await resolveWikiLibraryForInput(input, config, exec, config.requestTimeoutMs ?? 20_000);
       const data = await fetchWikiDetail({
         baseUrl: resolved.baseUrl,
@@ -2781,6 +2798,7 @@ async function askWikiImportConfirmation(args, exec, config = {}) {
   const input = parseWikiTreeToolArguments(args, {
     configuredProjectId: resolveDefaultProjectId(config, exec),
   });
+  rememberProjectIdFromArgs(args, input.projectId, config, exec);
   const resolved = await resolveWikiLibraryForInput(input, config, exec, config.requestTimeoutMs ?? 20_000);
   const tree = await fetchWikiTree({
     baseUrl: resolved.baseUrl,
@@ -2855,6 +2873,7 @@ async function importWikiFromSubmission(submission, args, exec, config = {}) {
   const dryRun = booleanOption(args.dry_run, false);
   const session = await createAuthenticatedSession(baseOptions);
   const uploadedImages = [];
+  const sourceMarkdown = typeof submission.markdown === 'string' ? submission.markdown : '';
 
   if (!dryRun) {
     for (const image of Array.isArray(submission.images) ? submission.images : []) {
@@ -2877,9 +2896,10 @@ async function importWikiFromSubmission(submission, args, exec, config = {}) {
   }
 
   const markdownWithImages = replaceImagePlaceholders(
-    submission.markdown,
+    sourceMarkdown,
     projectId,
     uploadedImages,
+    { baseUrl },
   );
   const missingImagePlaceholders = extractPastedImagePlaceholders(markdownWithImages);
   const filename = stringOption(args.filename, 'filename')
@@ -2896,6 +2916,7 @@ async function importWikiFromSubmission(submission, args, exec, config = {}) {
       bytes: Buffer.byteLength(markdownWithImages, 'utf8'),
       dryRun: true,
       succeeded: true,
+      sourceMarkdown,
       markdown: markdownWithImages,
       uploadedImages,
       result: {},
@@ -2915,6 +2936,7 @@ async function importWikiFromSubmission(submission, args, exec, config = {}) {
       succeeded: false,
       error: `pasted image cache missing for ${missingImagePlaceholders.length} image(s); re-paste the images before importing to CTeam Wiki`,
       errorDetails: { missingImagePlaceholders },
+      sourceMarkdown,
       markdown: markdownWithImages,
       uploadedImages,
       result: {},
@@ -2946,6 +2968,7 @@ async function importWikiFromSubmission(submission, args, exec, config = {}) {
       succeeded: false,
       error: errorMessage(error),
       errorDetails: errorDetails(error),
+      sourceMarkdown,
       markdown: markdownWithImages,
       uploadedImages,
       result: {},
@@ -2971,6 +2994,7 @@ async function importWikiFromSubmission(submission, args, exec, config = {}) {
     bytes: Buffer.byteLength(markdownWithImages, 'utf8'),
     dryRun: false,
     succeeded: true,
+    sourceMarkdown,
     markdown: markdownWithImages,
     uploadedImages,
     target,
@@ -2994,6 +3018,22 @@ function renderWikiSubmit(value) {
   ];
   if (!succeeded) lines.push(`error=${value.error}`);
   return lines.join('\n');
+}
+
+function presentWikiImportResult(_args, result) {
+  if (result.isError || result.meta === undefined) return undefined;
+  return {
+    card: 'generic',
+    title: result.meta.succeeded === false
+      ? 'CTeam Wiki 导入失败'
+      : result.meta.dryRun
+        ? 'CTeam Wiki 导入预览'
+        : 'CTeam Wiki 导入完成',
+    content: [{
+      type: 'text',
+      text: `${CTEAM_WIKI_IMPORT_PRESENTATION_MARKER}${JSON.stringify(result.meta)}`,
+    }],
+  };
 }
 
 export function createWikiMarkdownSubmitTool(config = {}) {
@@ -3039,13 +3079,16 @@ export function createWikiMarkdownSubmitTool(config = {}) {
           bytes: { type: 'integer', required: true },
           dryRun: { type: 'boolean', required: true },
           succeeded: { type: 'boolean', required: true },
+          sourceMarkdown: { type: 'string' },
           markdown: { type: 'string', required: true },
           uploadedImages: { type: 'array', required: true, items: submissionImageSchema },
           result: { type: 'object', required: true, additionalProperties: true, properties: {} },
         },
       },
       render: (_args, value) => [{ type: 'text', text: renderWikiSubmit(value) }],
+      presentationMeta: (_args, value) => value,
     },
+    presentResult: presentWikiImportResult,
     timeoutMs: config.timeoutMs ?? 300_000,
     isConcurrencySafe: () => false,
     async execute(args, exec) {
@@ -3109,17 +3152,24 @@ export function createWikiMarkdownImportTool(config = {}) {
           filename: { type: 'string', required: true },
           bytes: { type: 'integer', required: true },
           dryRun: { type: 'boolean', required: true },
+          succeeded: { type: 'boolean', required: true },
+          sourceMarkdown: { type: 'string', required: true },
+          markdown: { type: 'string', required: true },
+          uploadedImages: { type: 'array', required: true, items: submissionImageSchema },
           result: { type: 'object', required: true, additionalProperties: true, properties: {} },
         },
       },
       render: (_args, value) => [{ type: 'text', text: renderWikiImport(value) }],
+      presentationMeta: (_args, value) => value,
     },
+    presentResult: presentWikiImportResult,
     timeoutMs: config.timeoutMs ?? 120_000,
     isConcurrencySafe: () => false,
     async execute(args, exec) {
       const input = parseWikiImportToolArguments(args, {
         configuredProjectId: resolveDefaultProjectId(config, exec),
       });
+      rememberProjectIdFromArgs(args, input.projectId, config, exec);
       const cwd = sessionCwd(exec) ?? process.cwd();
       const resolved = await resolveWikiLibraryForInput(input, config, exec, config.requestTimeoutMs ?? 60_000);
       const lastTarget = input.useLastTarget
@@ -3135,6 +3185,7 @@ export function createWikiMarkdownImportTool(config = {}) {
       const buffer = input.markdown === undefined
         ? fs.readFileSync(filePath)
         : Buffer.from(input.markdown, 'utf8');
+      const sourceMarkdown = buffer.toString('utf8');
       const filename = input.filename || (filePath ? path.basename(filePath) : 'import.md');
       if (input.dryRun) {
         return {
@@ -3145,6 +3196,10 @@ export function createWikiMarkdownImportTool(config = {}) {
           filename,
           bytes: buffer.length,
           dryRun: true,
+          succeeded: true,
+          sourceMarkdown,
+          markdown: sourceMarkdown,
+          uploadedImages: [],
           result: {},
         };
       }
@@ -3208,6 +3263,10 @@ export function createWikiMarkdownImportTool(config = {}) {
         filename,
         bytes: buffer.length,
         dryRun: false,
+        succeeded: true,
+        sourceMarkdown,
+        markdown: sourceMarkdown,
+        uploadedImages: [],
         result: typeof result === 'object' && result !== null ? result : { value: result },
       };
     },

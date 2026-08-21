@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import {
   createDemandFromSubmissionTool,
@@ -12,6 +15,17 @@ import {
   selectDemandModel,
   uploadedFileId,
 } from '../src/submission.js';
+
+function writeLoginConfig() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-cteam-login-'));
+  const filePath = path.join(dir, 'local.json');
+  fs.writeFileSync(filePath, JSON.stringify({
+    loginUrl: 'https://devops.cwoa.net/login',
+    username: 'user',
+    password: 'pass',
+  }), 'utf8');
+  return filePath;
+}
 
 test('converts Markdown paragraphs, headings, and images to CTeam HTML', () => {
   assert.equal(
@@ -35,6 +49,18 @@ test('replaces pasted image placeholders with CTeam download URLs', () => {
       [{ placeholder: 'cteam-pasted-image://abc', fileId: 'file-1' }],
     ),
     '正文\n![图](/ms/vteam/api/user/file/m68126/download/file-1)',
+  );
+});
+
+test('can replace pasted image placeholders with absolute CTeam download URLs', () => {
+  assert.equal(
+    replaceImagePlaceholders(
+      '正文\n![图](cteam-pasted-image://abc)',
+      'm68126',
+      [{ placeholder: 'cteam-pasted-image://abc', fileId: 'file-1' }],
+      { baseUrl: 'https://devops.cwoa.net/' },
+    ),
+    '正文\n![图](https://devops.cwoa.net/ms/vteam/api/user/file/m68126/download/file-1)',
   );
 });
 
@@ -156,7 +182,7 @@ test('rejects create when pasted image placeholders are not uploaded', async () 
   let createCalled = false;
   const tool = createDemandFromSubmissionTool({
     projectId: 'm68126',
-    loginConfigPath: './package.json',
+    loginConfigPath: writeLoginConfig(),
     createAuthenticatedSession: async () => ({ fake: true }),
     fetchIssueModelProject: async () => ({}),
     createIssue: async () => {
@@ -184,7 +210,7 @@ test('rejects create when pasted image placeholders are not uploaded', async () 
 test('returns retry arguments instead of throwing when CTeam create fails', async () => {
   const tool = createDemandFromSubmissionTool({
     projectId: 'm68126',
-    loginConfigPath: './package.json',
+    loginConfigPath: writeLoginConfig(),
     createAuthenticatedSession: async () => ({ fake: true }),
     fetchIssueModelProject: async () => ({
       issueModelTypes: [{
@@ -248,6 +274,56 @@ test('returns retry arguments instead of throwing when CTeam create fails', asyn
   assert.equal(result.retryArgs.category_id, 'category-id');
   assert.deepEqual(result.retryArgs.category_path, ['自动化运维中心']);
   assert.equal(result.retryArgs.fields.version, 'V4.0');
-  assert.equal(result.retryArgs.images.length, 0);
-  assert.match(result.retryArgs.draft_markdown, /\/ms\/vteam\/api\/user\/file\/m68126\/download\/uploaded-file/u);
+  assert.equal(result.sourceMarkdown, '# 用户故事\n![截图](cteam-pasted-image://one)');
+  assert.equal(result.retryArgs.images.length, 1);
+  assert.equal(result.retryArgs.draft_markdown, '# 用户故事\n![截图](cteam-pasted-image://one)');
+  assert.match(result.markdown, /\/ms\/vteam\/api\/user\/file\/m68126\/download\/uploaded-file/u);
+});
+
+test('keeps source Markdown separate from uploaded CTeam image links', async () => {
+  let body;
+  const tool = createDemandFromSubmissionTool({
+    projectId: 'm68126',
+    loginConfigPath: writeLoginConfig(),
+    createAuthenticatedSession: async () => ({ fake: true }),
+    fetchIssueModelProject: async () => ({
+      issueModelTypes: [{
+        typeClassify: 'DEMAND',
+        issueModelTypes: [{
+          id: 'story-model',
+          typeId: 'story-type',
+          typeName: 'Story',
+          templateId: 'story-template',
+          apply: true,
+        }],
+      }],
+    }),
+    uploadIssueFile: async () => ({ id: 'uploaded-file' }),
+    createIssue: async (options) => {
+      body = options.body;
+      return { issueId: 'issue-id', issueNo: 'p176_1', title: '巡检指标库' };
+    },
+  });
+
+  const sourceMarkdown = '# 用户故事\n![截图](cteam-pasted-image://one)';
+  const result = await tool.execute({
+    title: '巡检指标库',
+    category_id: 'category-id',
+    category_path: ['自动化运维中心'],
+    draft_markdown: sourceMarkdown,
+    fields: { priority: 'CENTRAL' },
+    field_definitions: [{ id: 'priority', name: 'priority', label: '优先级', type: 'SELECT' }],
+    images: [{
+      placeholder: 'cteam-pasted-image://one',
+      alt: '截图',
+      contentType: 'image/png',
+      bytes: 10,
+      localPath: 'C:/tmp/one.png',
+    }],
+  }, {});
+
+  assert.equal(result.succeeded, true);
+  assert.equal(result.sourceMarkdown, sourceMarkdown);
+  assert.match(result.markdown, /\/ms\/vteam\/api\/user\/file\/m68126\/download\/uploaded-file/u);
+  assert.match(body.desc, /\/ms\/vteam\/api\/user\/file\/m68126\/download\/uploaded-file/u);
 });

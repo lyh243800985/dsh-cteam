@@ -28,6 +28,13 @@ a PRD draft:
 - The intended right-side workspace is split Markdown:
   editable Markdown source on one side and rendered preview with images on the
   other.
+- If the user provides Markdown text or asks to edit a Markdown file for later
+  PRD/Wiki submission, open it in the right-side workspace with
+  `initial_markdown` when possible. The editable source is the authoritative
+  draft; uploaded CTeam links from a previous submission must not overwrite it.
+- Saving during editing means browser-cache autosave. A durable `.md` copy is
+  only produced through explicit browser download, normally after a successful
+  upload when CTeam image links exist.
 - If `cteam_open_prd_authoring` is unavailable, say that clearly and continue by
   drafting or revising the PRD Markdown in the conversation or an agreed local
   Markdown file. Do not use the browser helper as a substitute mode switch.

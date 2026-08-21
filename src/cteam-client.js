@@ -2,9 +2,25 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import https from 'node:https';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 export const DEFAULT_BASE_URL = 'https://devops.cwoa.net';
-const LOGIN_CONFIG_NAME = path.join('.ops-local', 'cw-browser-login.json');
+export const PROJECT_LOCAL_CONFIG_NAME = path.join('local', 'local.json');
+export const LEGACY_PROJECT_LOGIN_CONFIG_NAME = path.join('.ops-local', 'cw-browser-login.json');
+export const PACKAGE_LOCAL_CONFIG_NAME = path.join('local', 'local.json');
+export const PACKAGE_ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+
+export function packageLocalConfigPath() {
+  return path.join(PACKAGE_ROOT, PACKAGE_LOCAL_CONFIG_NAME);
+}
+
+export function projectLocalConfigPath(cwd) {
+  return path.join(cwd, PROJECT_LOCAL_CONFIG_NAME);
+}
+
+export function legacyProjectLoginConfigPath(cwd) {
+  return path.join(cwd, LEGACY_PROJECT_LOGIN_CONFIG_NAME);
+}
 
 function cteamApiFailure(resourceName, payload) {
   const error = new Error(`CTeam ${resourceName} API failed: ${payload.message ?? `status ${payload.status}`}`);
@@ -166,19 +182,37 @@ export function readLoginConfig(configPath) {
   return config;
 }
 
-export function resolveLoginConfigPath(configuredPath, sessionCwd, processCwd = process.cwd()) {
+function hasLoginConfigFields(config) {
+  return ['loginUrl', 'username', 'password'].every((key) => {
+    return typeof config[key] === 'string' && config[key];
+  });
+}
+
+export function loginConfigPathCandidates(configuredPath, sessionCwd, processCwd = process.cwd()) {
   const candidates = [];
   if (typeof configuredPath === 'string' && configuredPath.trim()) {
     candidates.push(path.resolve(configuredPath));
   }
   if (typeof sessionCwd === 'string' && sessionCwd) {
-    candidates.push(path.join(sessionCwd, LOGIN_CONFIG_NAME));
+    candidates.push(projectLocalConfigPath(sessionCwd));
+    candidates.push(legacyProjectLoginConfigPath(sessionCwd));
+  } else if (typeof processCwd === 'string' && processCwd) {
+    candidates.push(projectLocalConfigPath(processCwd));
+    candidates.push(legacyProjectLoginConfigPath(processCwd));
   }
-  candidates.push(path.join(processCwd, LOGIN_CONFIG_NAME));
+  candidates.push(packageLocalConfigPath());
+  return [...new Set(candidates)];
+}
 
-  const resolved = candidates.find((candidate) => fs.existsSync(candidate));
-  if (resolved !== undefined) return resolved;
-  throw new Error(`CTeam login config not found; checked: ${candidates.join(', ')}`);
+export function resolveLoginConfigPath(configuredPath, sessionCwd, processCwd = process.cwd()) {
+  const candidates = loginConfigPathCandidates(configuredPath, sessionCwd, processCwd);
+
+  for (const candidate of candidates) {
+    if (!fs.existsSync(candidate)) continue;
+    const config = readCteamLocalConfig(candidate);
+    if (hasLoginConfigFields(config)) return candidate;
+  }
+  throw new Error(`CTeam browser login state is unavailable and legacy login config was not found; checked: ${candidates.join(', ')}`);
 }
 
 async function login(config, options) {

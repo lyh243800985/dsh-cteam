@@ -4,7 +4,7 @@ import {
   PROJECT_ID_PARAMETER_DESCRIPTION,
   PROJECT_PARAMETER_DESCRIPTION,
 } from './common.js';
-import { resolveDefaultProjectId } from './project-config.js';
+import { rememberProjectIdFromArgs, resolveDefaultProjectId } from './project-config.js';
 
 export const CTEAM_PRD_AUTHORING_PRESENTATION_MARKER = 'dsh-cteam-prd-authoring-v1:';
 
@@ -92,6 +92,7 @@ export function createPrdAuthoringTool(config = {}) {
       const parsed = parseAuthoringToolArguments(args, {
         configuredProjectId: resolveDefaultProjectId(config, exec),
       });
+      rememberProjectIdFromArgs(args, parsed.projectId, config, exec);
       return createAuthoringWorkspace(parsed);
     },
   });

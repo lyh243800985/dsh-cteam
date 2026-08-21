@@ -2,6 +2,7 @@ node_modules/
 dist/
 .temp/
 .ops-local/
+local/
 *.log
 *.map
 dsh-web.stdout.log

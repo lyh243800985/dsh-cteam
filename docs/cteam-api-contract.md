@@ -5,32 +5,47 @@
 ## 基础约定
 
 - CTeam 地址：`https://devops.cwoa.net`
-- 当前验证项目：`m68126`（本地登录 JSON 中的 `projectId`）
-- 项目 ID 不写死在解析代码或 API client 中。本地登录 JSON 可通过 `projectId` 指定主项目；插件挂载配置仍可通过 `projectId` 兼容覆盖。
+- 当前验证项目：`m68126`（仅为接口验证样本，不是插件固定项目）
+- 项目 ID 不写死在解析代码或 API client 中。本地长期配置 JSON 可通过 `projectId` 指定主项目；插件挂载配置仍可通过 `projectId` 兼容覆盖。
 - 工具调用显式提供 `project_id` 或包含 `/vteam/{projectId}/` 的 `project_url` 时，使用显式项目；两者同时提供时必须一致。
-- 工具调用省略两个项目参数时，优先使用插件配置的 `projectId`；插件未配置时读取 `.ops-local/cw-browser-login.json` 中的 `projectId`。
-- `/ms/vteam/api/user/**` 使用 CTeam 网页登录态，Open API 的 `X-DEVOPS-ACCESS-TOKEN` 不能直接代替该登录态。
-- 插件中不得硬编码账号、密码、Cookie、Token 或项目 ID；默认项目推荐和登录态放在同一个本地 JSON 中。
+- 工具调用省略两个项目参数时，优先使用插件配置的 `projectId`；插件未配置时依次读取项目级 `local/local.json`、旧项目级 `.ops-local/cw-browser-login.json`、包内用户级 `local/local.json` 中的 `projectId`。
+- `/ms/vteam/api/user/**` 使用 CTeam 网页登录态，Open API 的 `X-DEVOPS-ACCESS-TOKEN` 不能直接代替该登录态。认证策略优先复用浏览器 Cookie；如果拿不到浏览器 Cookie，再提示用户登录浏览器或退回旧账号密码配置。
+- 插件中不得硬编码账号、密码、Cookie、Token 或项目 ID；默认项目推荐放在包内用户级 `local/local.json` 中。
 - 读取类接口不需要写操作审批。创建、修改、评论、流转等写接口必须由对话中的确认表单或显式用户指令触发；调试时优先使用 dry-run。
 
 ### 项目配置
 
-当前推荐在本地登录配置中同时放登录态和默认项目：
+当前推荐在包内用户级长期配置中放默认项目。`local/local.json` 不强制要求
+`loginUrl`、`username`、`password`：
 
 ```json
 {
+  "projectId": "your-project-id"
+}
+```
+
+如果当前环境无法读取浏览器 Cookie，可以兼容旧方案，在同一个 JSON 中补充：
+
+```json
+{
+  "projectId": "your-project-id",
   "loginUrl": "https://devops.cwoa.net/...",
   "username": "your-username",
-  "password": "your-password",
-  "projectId": "m68126"
+  "password": "your-password"
 }
 ```
 
 插件挂载配置中的 `config.projectId` 仍然保留兼容能力，并且优先级高于
 本地 JSON。后续接入人如果要切换主项目，推荐只修改
-`.ops-local/cw-browser-login.json` 中的 `projectId`；不要修改解析器或
+`local/local.json` 中的 `projectId`；不要修改解析器或
 `cteam-client.js`。如果两个位置都没有配置 `projectId`，每次工具调用
 都必须提供 `project_id` 或 `project_url`。
+
+当工具调用显式携带 `project_id`，或 `project_url` / `demand_url` /
+`issue_url` / `wiki_url` 中能解析出项目号时，插件会自动记忆该项目号：
+存在当前项目目录时写入项目级 `local/local.json`，否则写入包内用户级
+`local/local.json`。写入目标必须与默认项目解析优先级一致，避免写入后仍被
+更高优先级配置覆盖。
 
 
 验证状态：已通过真实接口请求验证。
@@ -169,8 +184,8 @@ Tool 输入：
 
 约束：
 
-- `project_url` 与 `project_id` 都是可选的；两者都省略时使用插件配置中的 `projectId`。
-- 如果插件未配置 `projectId`，则至少提供 `project_url` 或 `project_id`。
+- `project_url` 与 `project_id` 都是可选的；两者都省略时依次使用插件配置、项目级 `local/local.json`、旧项目级 `.ops-local/cw-browser-login.json`、包内用户级 `local/local.json` 中的 `projectId`。
+- 如果这些位置都未配置 `projectId`，则至少提供 `project_url` 或 `project_id`。
 - 同时提供时，必须校验二者解析结果一致。
 - 返回完整树，并额外提供扁平索引，便于 Agent 按名称查找节点 ID。
 - 名称可能重复，Agent 选择分类时应使用完整路径或节点 ID。

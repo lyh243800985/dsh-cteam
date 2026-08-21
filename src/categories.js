@@ -36,7 +36,7 @@ export function resolveProjectId({ projectUrl, projectId, configuredProjectId })
     throw new Error(`project_id "${explicit}" does not match project_url project "${parsed}"`);
   }
   if (explicit === undefined && parsed === undefined && configured === undefined) {
-    throw new Error('provide project_url or project_id, or configure projectId in the dsh-cteam plugin config or .ops-local/cw-browser-login.json');
+    throw new Error('provide project_url or project_id, or configure projectId in the dsh-cteam plugin config, project local/local.json, legacy project .ops-local/cw-browser-login.json, or package local/local.json');
   }
 
   const resolved = explicit ?? parsed ?? configured;

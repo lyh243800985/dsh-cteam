@@ -1,0 +1,7 @@
+{
+  "_usage": "Copy the fields you need into local/local.json. Replace projectId with your CTeam project ID. Browser login state is preferred; loginUrl/username/password are only for the legacy fallback.",
+  "projectId": "your-project-id",
+  "loginUrl": "",
+  "username": "",
+  "password": ""
+}

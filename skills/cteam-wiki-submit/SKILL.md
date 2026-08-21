@@ -36,6 +36,12 @@ Use this skill for interactive Markdown upload/import into CTeam Wiki.
 the category-selection form, reads the current right-side Markdown workspace,
 uploads pasted images, and imports only after the user confirms.
 
+Image upload and CTeam-link replacement are upload-only transformations. Do not
+write the CTeam download URLs back into the right-side Markdown workspace,
+browser cache, or original Markdown. If a tool result exposes `sourceMarkdown`,
+keep using it for later edits or another upload; the returned `markdown` is only
+the imported copy.
+
 ## Separate Histories
 
 Wiki import history is independent from PRD/demand submission history. Never use

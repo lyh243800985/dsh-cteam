@@ -20,6 +20,7 @@ window.__ModuleLoader__.load({
     const PRD_AUTHORING_PRESENTATION_MARKER = 'dsh-cteam-prd-authoring-v1:';
     const SUBMISSION_PRESENTATION_MARKER = 'dsh-cteam-submission-v1:';
     const WIKI_DETAIL_PRESENTATION_MARKER = 'dsh-cteam-wiki-detail-v1:';
+    const WIKI_IMPORT_PRESENTATION_MARKER = 'dsh-cteam-wiki-import-v1:';
     const CTEAM_BASE_URL = 'https://devops.cwoa.net';
     const PASTED_IMAGE_URL_PREFIX = 'cteam-pasted-image://';
     const AUTHORING_AUTOSAVE_PREFIX = 'dsh-cteam-prd-autosave:';
@@ -262,6 +263,13 @@ window.__ModuleLoader__.load({
       return null;
     }
 
+    function parseWikiImportPayload(block) {
+      const parsed = parseMarkedPayload(block, WIKI_IMPORT_PRESENTATION_MARKER);
+      if (isRecord(parsed)) return parsed;
+      if (!isRecord(block) || block.kind !== 'tool-result' || block.isError) return null;
+      return isRecord(block.meta) ? block.meta : null;
+    }
+
     function parseSubmissionResult(block) {
       const meta = parseSubmissionPayload(block);
       if (!meta || meta.dryRun === true || meta.succeeded === false || typeof meta.markdown !== 'string') return null;
@@ -393,11 +401,13 @@ window.__ModuleLoader__.load({
       return normalized || fallback;
     }
 
-    function downloadMarkdownCopy(result) {
-      const markdown = text(result?.markdown);
+    function downloadMarkdownCopy(result, options = {}) {
+      const markdown = text(options.markdown ?? result?.markdown);
       if (!markdown) return;
       const issue = isRecord(result.issue) ? result.issue : {};
-      const name = safeDownloadName(`${text(issue.number || issue.id || result.title, 'cteam-prd')} ${text(result.title)}`.trim());
+      const suffix = text(options.suffix);
+      const baseName = text(options.filename || `${text(issue.number || issue.id || result.title, 'cteam-prd')} ${text(result.title)}`.trim());
+      const name = safeDownloadName(`${baseName}${suffix ? ` ${suffix}` : ''}`);
       const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
@@ -732,11 +742,16 @@ window.__ModuleLoader__.load({
       const pending = getPendingSubmission(sessionId);
       const current = getAuthoringState(sessionId);
       const workspaceKey = text(result.workspaceKey || pending?.workspaceKey || current?.workspaceKey);
-      if (!workspaceKey || typeof result.markdown !== 'string') return;
+      const sourceMarkdown = text(result.sourceMarkdown || pending?.markdown || current?.markdown);
+      if (!workspaceKey || !sourceMarkdown) return;
       const title = text(result.title || pending?.title || current?.title, '未命名需求');
       const previewImages = Array.isArray(result.previewImages) ? result.previewImages : [];
+      const sourceImages = Array.isArray(pending?.images) && pending.images.length > 0
+        ? pending.images
+        : pastedImagesForMarkdown(workspaceKey, sourceMarkdown);
+      rememberPastedImages(workspaceKey, sourceImages);
       rememberAuthoringPreviewImages(workspaceKey, previewImages);
-      const savedAt = saveAuthoringAutosave(workspaceKey, title, result.markdown, previewImages);
+      const savedAt = saveAuthoringAutosave(workspaceKey, title, sourceMarkdown, sourceImages);
       authoringStateBySession.set(sessionId, {
         projectId: text(result.projectId || pending?.projectId || current?.projectId),
         title,
@@ -744,8 +759,8 @@ window.__ModuleLoader__.load({
         sourceIssueUrl: text(current?.sourceIssueUrl),
         workspaceId: text(result.workspaceId || pending?.workspaceId || current?.workspaceId),
         workspaceKey,
-        markdown: result.markdown,
-        images: pastedImagesForMarkdown(workspaceKey, result.markdown),
+        markdown: sourceMarkdown,
+        images: pastedImagesForMarkdown(workspaceKey, sourceMarkdown),
         savedAt,
       });
       notifyAuthoring(sessionId);
@@ -861,26 +876,21 @@ window.__ModuleLoader__.load({
         ? submittedResult.markdown
         : markdown;
       const previewImages = Array.isArray(submittedResult?.previewImages) ? submittedResult.previewImages : pastedImages;
-      const applySubmittedCopyToEditor = () => {
-        if (!submittedResult) return;
-        const nextMarkdown = compactDataImageMarkdown(submittedResult.markdown, workspaceKey);
-        rememberAuthoringPreviewImages(workspaceKey, submittedResult.previewImages);
-        const nextTitle = text(submittedResult.title || title, '未命名需求');
-        setTitle(nextTitle);
-        setMarkdown(nextMarkdown);
-        setPastedImages(pastedImagesForWorkspace(workspaceKey));
-        setAuthoringLocked(sessionId, false);
-        lastAutosavedMarkdownRef.current = nextMarkdown;
-        lastAutosavedTitleRef.current = nextTitle;
-        const savedAt = saveAuthoringAutosave(workspaceKey, nextTitle, nextMarkdown, pastedImagesForMarkdown(workspaceKey, nextMarkdown));
-        setLastSavedAt(savedAt);
-      };
       React.useEffect(() => {
         if (!submittedResult) return;
         const submissionKey = text(submittedResult.issue?.id || submittedResult.issueUrl || submittedResult.markdown);
         if (!submissionKey || appliedSubmissionRef.current === submissionKey) return;
         appliedSubmissionRef.current = submissionKey;
-        applySubmittedCopyToEditor();
+        const sourceMarkdown = text(submittedResult.sourceMarkdown || markdown);
+        const nextTitle = text(submittedResult.title || title, '未命名需求');
+        rememberAuthoringPreviewImages(workspaceKey, submittedResult.previewImages);
+        setTitle(nextTitle);
+        setMarkdown(sourceMarkdown);
+        setPastedImages(pastedImagesForWorkspace(workspaceKey));
+        lastAutosavedMarkdownRef.current = sourceMarkdown;
+        lastAutosavedTitleRef.current = nextTitle;
+        const savedAt = saveAuthoringAutosave(workspaceKey, nextTitle, sourceMarkdown, pastedImagesForMarkdown(workspaceKey, sourceMarkdown));
+        setLastSavedAt(savedAt);
       }, [submittedResult, workspaceKey]);
       const actionButtons = submittedResult ? React.createElement('div', { style: styles.authoringActions },
         React.createElement(Button, {
@@ -888,11 +898,6 @@ window.__ModuleLoader__.load({
           variant: 'outline',
           onClick: () => downloadMarkdownCopy(submittedResult),
         }, '保存副本'),
-        React.createElement(Button, {
-          size: 'sm',
-          variant: 'outline',
-          onClick: applySubmittedCopyToEditor,
-        }, '同步已上传内容'),
       ) : null;
 
       const previewColumn = React.createElement('section', { style: lockState.locked ? styles.authoringReadonlyColumn : styles.authoringColumn },
@@ -1240,22 +1245,32 @@ window.__ModuleLoader__.load({
 
     function CteamCategoryPicker({ categories, selectedIds, setSelectedIds, disabled, searchLeavesOnly = true }) {
       const [query, setQuery] = React.useState('');
-      const options = nextCategoryLevelOptions(categories, selectedIds);
+      const currentId = selectedIds[selectedIds.length - 1] ?? '';
+      const currentNode = currentId ? categoryById(categories, currentId) : null;
+      const currentChildren = nextCategoryLevelOptions(categories, selectedIds);
       const searchResults = searchCategories(categories, query, searchLeavesOnly);
       const pick = (category) => {
         const pathIds = categoryIdPath(categories, category.id);
         setSelectedIds(pathIds.length > 0 ? pathIds : [...selectedIds, category.id]);
+        setQuery('');
       };
-      const changeLevel = (level, categoryId) => {
-        setSelectedIds([...selectedIds.slice(0, level), categoryId]);
+      const goBack = () => {
+        if (selectedIds.length === 0 || disabled) return;
+        setSelectedIds(selectedIds.slice(0, -1));
+        setQuery('');
       };
-      const levels = [...selectedIds, 'next'];
+      const selectedPath = categorySelectionPath(categories, selectedIds);
+      const currentTitle = currentNode ? text(currentNode.name || currentNode.title) : '根目录';
       return React.createElement('div', { style: styles.categoryPicker },
+        React.createElement('div', { style: styles.wikiTreePath },
+          React.createElement('span', { style: styles.formHint }, '当前位置'),
+          React.createElement('span', { style: styles.wikiTreePathText }, selectedPath.length > 0 ? selectedPath.join(' / ') : '根目录'),
+        ),
         React.createElement('input', {
           type: 'search',
           value: query,
           disabled,
-          placeholder: '搜索分类路径',
+          placeholder: `搜索${currentTitle}下的分类`,
           onChange: (event) => setQuery(event.target.value),
           style: styles.formInput,
         }),
@@ -1274,23 +1289,36 @@ window.__ModuleLoader__.load({
                 style: styles.optionButton,
               }, text((category.path ?? [category.name]).join(' / ')))),
           )
-          : React.createElement('div', { style: styles.categoryLevels },
-            levels.map((categoryId, level) => {
-              const levelOptions = categoryId === 'next'
-                ? options
-                : level === 0 ? categories.filter((category) => Number(category.depth ?? 0) === 0) : categoryChildren(categories, selectedIds[level - 1]);
-              if (levelOptions.length === 0) return null;
-              return React.createElement('select', {
-                key: `${level}-${categoryId}`,
-                value: categoryId === 'next' ? '' : categoryId,
-                disabled,
-                onChange: (event) => changeLevel(level, event.target.value),
-                style: styles.formInput,
-              },
-                React.createElement('option', { value: '' }, level === 0 ? '选择一级分类' : '选择下级分类'),
-                levelOptions.map((category) => React.createElement('option', { key: category.id, value: category.id }, text(category.name))),
-              );
-            }),
+          : React.createElement('div', { style: styles.wikiTreeList },
+            currentChildren.length === 0
+              ? React.createElement('div', { style: styles.optionEmpty }, selectedIds.length > 0 ? '当前分类没有下级，可直接提交' : '暂无需求分类')
+              : currentChildren.map((category) => {
+                const categoryId = text(category.id);
+                const hasChildren = Number(category.childCount ?? 0) > 0;
+                const selected = currentId === categoryId;
+                return React.createElement('button', {
+                  type: 'button',
+                  key: categoryId,
+                  disabled,
+                  onClick: () => pick(category),
+                  style: selected ? styles.wikiTreeNodeSelected : styles.wikiTreeNode,
+                  title: hasChildren ? '选择并查看下一级' : '选择此分类',
+                },
+                  React.createElement('span', { style: styles.wikiTreeNodeTitle }, text(category.name || category.title)),
+                  React.createElement('span', { style: styles.wikiTreeNodeMeta },
+                    hasChildren ? `${Number(category.childCount)} ›` : '选择',
+                  ),
+                );
+              }),
+          ),
+        React.createElement('div', { style: styles.wikiTreeFooter },
+          React.createElement(Button, {
+            size: 'sm',
+            variant: 'outline',
+            disabled: disabled || selectedIds.length === 0,
+            onClick: goBack,
+          }, '返回上一级'),
+          selectedPath.length > 0 ? React.createElement('span', { style: styles.formHint }, '确认无误后点击表单底部提交') : null,
           ),
       );
     }
@@ -1764,10 +1792,11 @@ window.__ModuleLoader__.load({
         : result
           ? `${text(issue.number || issue.id, '已创建')} · ${shorten(result.title, 72)}`
           : '创建中…';
+      const sourceMarkdown = text(result?.sourceMarkdown || result?.markdown);
       const body = result ? React.createElement('div', { style: styles.submitResultBody },
         React.createElement('div', { style: styles.submitResultCopy },
-          React.createElement('div', { style: styles.toolSummary }, '是否保存一份 Markdown 副本？'),
-          React.createElement('div', { style: styles.formHint }, '副本来自本次实际上传内容，图片链接已替换为 CTeam 文件地址。'),
+          React.createElement('div', { style: styles.toolSummary }, '是否保存 Markdown 副本？'),
+          React.createElement('div', { style: styles.formHint }, '原版保留工作台草稿内容；CTeam 版来自本次实际上传内容，图片链接已替换为 CTeam 文件地址。'),
           result.issueUrl ? React.createElement('a', {
             href: result.issueUrl,
             target: '_blank',
@@ -1781,8 +1810,19 @@ window.__ModuleLoader__.load({
             React.createElement(Button, {
               size: 'sm',
               variant: 'primary',
-              onClick: () => downloadMarkdownCopy(result),
-            }, '保存 Markdown 副本'),
+              onClick: () => downloadMarkdownCopy(result, {
+                markdown: sourceMarkdown,
+                suffix: '原版',
+              }),
+            }, '保存原版'),
+            React.createElement(Button, {
+              size: 'sm',
+              variant: 'primary',
+              onClick: () => downloadMarkdownCopy(result, {
+                markdown: result.markdown,
+                suffix: 'CTeam版',
+              }),
+            }, '保存 CTeam 版'),
             React.createElement(Button, {
               size: 'sm',
               variant: 'outline',
@@ -1812,9 +1852,10 @@ window.__ModuleLoader__.load({
 
     function CteamWikiImportResultRow(props) {
       const { block, inspect, sessionId } = props;
-      const [open, setOpen] = React.useState(false);
+      const [open, setOpen] = React.useState(true);
+      const [dismissed, setDismissed] = React.useState(false);
       const settled = isRecord(block) && block.kind === 'tool-result';
-      const meta = isRecord(block?.meta) ? block.meta : null;
+      const meta = parseWikiImportPayload(block);
       const error = settled && (block.isError || meta?.succeeded === false);
       React.useEffect(() => {
         if (!settled || !sessionId) return;
@@ -1824,8 +1865,12 @@ window.__ModuleLoader__.load({
       const summary = error
         ? text(meta?.error || block.error?.code, '请求失败')
         : settled
-          ? `${text(meta?.filename, 'Markdown')} · ${text(meta?.parentPath?.join?.(' / ') || meta?.parentId, '已导入')}`
+          ? `${text(meta?.filename, 'Markdown')} · 已导入`
           : '导入中…';
+      const targetPath = text(meta?.parentPath?.join?.(' / ') || meta?.parentId, '未选择目录');
+      const sourceMarkdown = text(meta?.sourceMarkdown || meta?.markdown);
+      const cteamMarkdown = text(meta?.markdown);
+      const canSave = Boolean(sourceMarkdown || cteamMarkdown);
       return React.createElement('div', { style: styles.toolRow },
         React.createElement(DisclosureRow, {
           icon: React.createElement(IconBrowseOutline16, { size: 15 }),
@@ -1836,11 +1881,51 @@ window.__ModuleLoader__.load({
           keepContentWhenOpen: true,
           onToggle: () => setOpen((value) => !value),
           collapsedContent: React.createElement('span', { style: styles.toolCollapsed }, summary),
-        }, settled ? React.createElement('div', { style: styles.toolBody },
+        }, settled ? React.createElement('div', { style: canSave ? styles.submitResultBody : styles.toolBody },
           React.createElement('div', { style: styles.submitResultCopy },
-            React.createElement('div', { style: styles.toolSummary }, summary),
-            React.createElement('div', { style: styles.formHint }, error ? text(meta?.error) : `图片 ${Number(meta?.uploadedImages?.length ?? 0)} 张，大小 ${Number(meta?.bytes ?? 0)} bytes`),
+            React.createElement('div', { style: styles.toolSummary }, canSave ? '是否保存 Markdown 副本？' : summary),
+            canSave ? React.createElement('div', { style: styles.formHint },
+              error ? `${summary}。` : `文件：${text(meta?.filename, 'Markdown')}`,
+            ) : null,
+            canSave ? React.createElement('div', { style: styles.formHint },
+              `目录：${targetPath}`,
+            ) : null,
+            React.createElement('div', { style: styles.formHint }, canSave
+              ? `原版保留草稿；CTeam 版使用本次导入内容。图片 ${Number(meta?.uploadedImages?.length ?? 0)} 张，大小 ${Number(meta?.bytes ?? 0)} bytes`
+              : text(meta?.error)),
           ),
+          canSave
+            ? dismissed
+              ? React.createElement('span', { style: styles.formHint }, '已跳过保存')
+              : React.createElement('div', { style: styles.formActions },
+                React.createElement(Button, {
+                  size: 'sm',
+                  variant: 'primary',
+                  onClick: () => downloadMarkdownCopy({
+                    title: text(meta.title || meta.filename, 'wiki-import'),
+                  }, {
+                    markdown: sourceMarkdown,
+                    suffix: '原版',
+                  }),
+                }, '保存原版'),
+                React.createElement(Button, {
+                  size: 'sm',
+                  variant: 'primary',
+                  disabled: !cteamMarkdown,
+                  onClick: () => downloadMarkdownCopy({
+                    title: text(meta.title || meta.filename, 'wiki-import'),
+                  }, {
+                    markdown: cteamMarkdown,
+                    suffix: 'CTeam版',
+                  }),
+                }, '保存 CTeam 版'),
+                React.createElement(Button, {
+                  size: 'sm',
+                  variant: 'outline',
+                  onClick: () => setDismissed(true),
+                }, '不保存'),
+              )
+            : null,
         ) : null),
         inspect ? React.createElement('button', {
           type: 'button',
@@ -2763,7 +2848,7 @@ window.__ModuleLoader__.load({
       toolRow: { padding: '1px 0' },
       toolCollapsed: { color: 'var(--dsw-alias-label-secondary)' },
       toolBody: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '3px 0 4px 24px' },
-      submitResultBody: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '6px 0 6px 24px' },
+      submitResultBody: { display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 10, padding: '6px 0 6px 24px' },
       submitResultCopy: { minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 },
       toolSummary: { minWidth: 0, color: 'var(--dsw-alias-label-secondary)', fontSize: 12, lineHeight: '18px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
       inspectButton: { margin: '0 0 2px 24px', padding: 0, border: 0, color: 'var(--dsw-alias-label-tertiary)', background: 'transparent', fontSize: 11, cursor: 'pointer' },
@@ -2805,6 +2890,10 @@ window.__ModuleLoader__.load({
           ),
           ctx.slots.register(
             { name: 'tool.call.toolview', key: 'cteam_upload_wiki_markdown' },
+            (props) => React.createElement(CteamWikiImportResultRow, props),
+          ),
+          ctx.slots.register(
+            { name: 'tool.call.toolview', key: 'cteam_import_wiki_markdown' },
             (props) => React.createElement(CteamWikiImportResultRow, props),
           ),
         ];

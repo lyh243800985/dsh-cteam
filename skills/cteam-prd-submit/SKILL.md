@@ -39,6 +39,13 @@ the create category and fields through that form, upload pasted images if
 present, convert Markdown to CTeam HTML, and call the demand create endpoint
 after the user confirms.
 
+Image upload and CTeam-link replacement must be treated as an upload-only
+transformation. The right-side workspace source Markdown, browser cache, and any
+user-provided original Markdown must remain unchanged, still containing local
+`cteam-pasted-image://...` placeholders. If the returned tool result includes
+both `sourceMarkdown` and `markdown`, use `sourceMarkdown` for continued local
+editing and use `markdown` only for the uploaded copy / downloaded copy.
+
 During the create confirmation and upload, the right-side editor should be
 read-only. After a successful create, the local workspace can be edited again if
 the user wants to create a corrected new demand later; do not describe that as

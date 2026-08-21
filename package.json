@@ -16,6 +16,7 @@
     "scripts",
     "test",
     "docs",
+    "example.json",
     "cordis.patch.yml",
     "README.md"
   ],

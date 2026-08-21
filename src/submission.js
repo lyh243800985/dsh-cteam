@@ -82,11 +82,15 @@ export function uploadedFileId(uploadResult) {
   return stringValue(value.id ?? value.fileId ?? value.data?.id);
 }
 
-export function replaceImagePlaceholders(markdown, projectId, uploadedImages) {
+export function replaceImagePlaceholders(markdown, projectId, uploadedImages, options = {}) {
   let next = stringValue(markdown);
+  const baseUrl = typeof options.baseUrl === 'string' && options.baseUrl
+    ? options.baseUrl.replace(/\/+$/u, '')
+    : '';
   for (const image of uploadedImages) {
     if (!image.placeholder || !image.fileId) continue;
-    const downloadUrl = `/ms/vteam/api/user/file/${encodeURIComponent(projectId)}/download/${encodeURIComponent(image.fileId)}`;
+    const path = `/ms/vteam/api/user/file/${encodeURIComponent(projectId)}/download/${encodeURIComponent(image.fileId)}`;
+    const downloadUrl = baseUrl ? `${baseUrl}${path}` : path;
     next = next.split(image.placeholder).join(downloadUrl);
   }
   return next;
